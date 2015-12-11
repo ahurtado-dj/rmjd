@@ -1,0 +1,6 @@
+# dependency declaration for app
+django==1.9
+requests==2.8.1
+pycrypto==2.6.1
+pyjwkest==1.0.9
+oic==0.7.8

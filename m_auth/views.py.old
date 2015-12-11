@@ -1,0 +1,115 @@
+
+# Create your views here.
+
+
+"""
+uid = "foo@example.com"
+issuer = client.discover(uid)
+provider_info = client.provider_config(issuer)
+client.redirect_uris = ['https://example.com/rp/authz_cb']
+registration_response = client.register(provider_info["registration_endpoint"])
+args = {
+    "redirect_uris": ['https://example.com/rp/authz_cb'],
+    "contacts": ["foo@example.com"]
+    }
+
+registration_response = client.register(
+    provider_info["registration_endpoint"], **args)
+
+from oic.oic.message import ProviderConfigurationResponse
+
+op_info = ProviderConfigurationResponse(
+    version="1.0", issuer="https://example.org/OP/1",
+    authorization_endpoint="https://example.org/OP/1/authz",
+    token_endpoint="https://example.org/OP/1/token",
+    ... and so on )
+
+# or
+# op_info = ProviderConfigurationResponse(**info)
+# if you have the provider info in the form of a dictionary
+
+client.provider_info = op_info
+"""
+
+
+import hashlib
+import hmac
+import json
+
+from oic.oic import Client
+from oic.oauth2 import rndstr
+from oic.oic.message import AuthorizationResponse
+from oic.utils.authn.client import ClientSecretPost
+
+from django.shortcuts import render
+from django.http import HttpResponse
+from django.http import HttpResponseRedirect
+
+import logging
+logger = logging.getLogger(__name__)
+
+
+CLIENT__OAUTH2KEY    = 'f4sOu4LoJPDDyVZ4abPrfEq51E0a'
+CLIENT__OAUTH2SECRET = 'fyX1eLbWZD9ImUSNIg28Ns2eIH0a'
+CLIENT__REDIRECTURL  = 'http://localhost:8000/auth/access_token_request/'
+WSO2IS__AUTHORIZATIONENDPOINT = 'https://190.184.205.151:9443/oauth2/authorize'
+WSO2IS__TOKENENDPOINT         = 'https://190.184.205.151:9443/oauth2/token'
+
+
+# implementation using FBV (function based views)
+
+def home(request):
+	logger.debug("starting auth...")
+	context = {}
+	return render(request, 'm_auth/home.html', context)
+
+def authorization_request(request):
+	client = Client()
+
+	request.session['state'] = rndstr()
+	request.session['nonce'] = rndstr()
+
+	args = {
+	    "client_id": CLIENT__OAUTH2KEY, # client.client_id,
+	    "response_type": "code",
+	    "scope": ["openid"],
+	    "nonce": request.session['nonce'],
+		"authorization_endpoint": CLIENT__REDIRECTURL,
+	    "redirect_uri": WSO2IS__AUTHORIZATIONENDPOINT, # client.redirect_uris[0]
+	}
+
+	result = client.do_authorization_request(state=request.session['state'], request_args=args)
+	logger.debug("session.state(2)=%s" % (request.session['state']))
+	return HttpResponseRedirect(result.headers['location'])
+
+def access_token_request(request):
+	client = Client(
+		client_id=CLIENT__OAUTH2KEY,
+		client_authn_method={"client_secret_post": ClientSecretPost}
+	)
+	raw_response = json.dumps(dict(request.GET))
+	aresp = client.parse_response(AuthorizationResponse, info=raw_response)#, sformat="urlencoded")
+	
+	logger.debug("session.state=%s" % (request.session['state']))
+	# assert aresp["state"] == client.state
+	if aresp['state'] == request.session['state']:
+		code = aresp['code']
+
+		params = {
+			"token_endpoint": WSO2IS__TOKENENDPOINT,
+			"code": code,
+			"client_id": CLIENT__OAUTH2KEY,
+			"client_secret": CLIENT__OAUTH2SECRET,
+			"redirect_uri": CLIENT__REDIRECTURL,
+		}
+		result = client.do_access_token_request(
+			scope = ["openid"],
+			state = aresp["state"] ,
+			request_args = params,
+			authn_method = "client_secret_post",
+		)
+		local_user = result['id_token']['sub']
+		document_data = local_user[:local_user.find('@')]
+		return HttpResponse("User {}".format(document_data))
+	else:
+		return HttpResponse("Error: check the request data or the autorization_endpoint.")
