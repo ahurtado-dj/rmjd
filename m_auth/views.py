@@ -29,7 +29,7 @@ def home(request):
 
 
 def authorization_request(request):
-	cliente = Client()
+	client = Client()
 	hapax = rndstr()
 	state = rndstr()
 	params = {
@@ -40,7 +40,7 @@ def authorization_request(request):
 		"nonce": hapax,
 		"redirect_uri": CLIENT__REDIRECTURL
 	}
-	result = cliente.do_authorization_request(
+	result = client.do_authorization_request(
 		state=state,
 		request_args=params
 	)
